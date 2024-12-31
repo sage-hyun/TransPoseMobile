@@ -22,6 +22,16 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var accData: List<FloatArray>
     private lateinit var oriData: List<FloatArray>
+
+    // Stateful input/outputs
+    private lateinit var pastFramesTensor: OnnxTensor
+    private lateinit var hStateTensor: OnnxTensor
+    private lateinit var cStateTensor: OnnxTensor
+    private lateinit var rootYTensor: OnnxTensor
+    private lateinit var lFootPosTensor: OnnxTensor
+    private lateinit var rFootPosTensor: OnnxTensor
+    private lateinit var tranTensor: OnnxTensor
+
     private var currentIndex = 0 // 현재 반복 인덱스
     private lateinit var socket: Socket // Socket.IO 클라이언트
 
@@ -44,8 +54,8 @@ class MainActivity : AppCompatActivity() {
 
             // 모델 파일 로드
             val assetManager = assets
-//            val modelPath = "transpose_net_241217.onnx"
-            val modelPath = "simplified_model_241217.onnx"
+            val modelPath = "transpose_net_241230.onnx"
+//            val modelPath = "simplified_model_241230.onnx"
             val modelBytes = assetManager.open(modelPath).readBytes()
             session = onnxEnv.createSession(modelBytes)
 
@@ -57,6 +67,24 @@ class MainActivity : AppCompatActivity() {
             if (accData.size != oriData.size) {
                 throw IllegalArgumentException("acc.json과 ori.json의 shape[0] 값이 다릅니다.")
             }
+
+            // 초기 값 설정
+            val tran = FloatArray(3) { 0f }             // 3D 벡터, 모두 0으로 초기화
+            val pastFrames = Array(26) { FloatArray(72) { 0f } } // 26x72 크기의 배열, 모두 0으로 초기화
+            val hState = Array(2) { FloatArray(256) { 0f } }     // 2x256 크기의 배열, 모두 0으로 초기화
+            val cState = Array(2) { FloatArray(256) { 0f } }     // 2x256 크기의 배열, 모두 0으로 초기화
+            val rootY = floatArrayOf(0.0f)              // 단일 값
+            val lFootPos = floatArrayOf(0.1283f, -0.9559f, 0.0750f) // 3D 벡터
+            val rFootPos = floatArrayOf(-0.1194f, -0.9564f, 0.0774f) // 3D 벡터
+
+            // ONNX Tensor로 변환
+            tranTensor = OnnxTensor.createTensor(onnxEnv, tran)
+            pastFramesTensor = OnnxTensor.createTensor(onnxEnv, pastFrames)
+            hStateTensor = OnnxTensor.createTensor(onnxEnv, hState)
+            cStateTensor = OnnxTensor.createTensor(onnxEnv, cState)
+            rootYTensor = OnnxTensor.createTensor(onnxEnv, rootY)
+            lFootPosTensor = OnnxTensor.createTensor(onnxEnv, lFootPos)
+            rFootPosTensor = OnnxTensor.createTensor(onnxEnv, rFootPos)
 
             // 1초 간격으로 추론 실행
             startInferenceLoop()
@@ -96,7 +124,14 @@ class MainActivity : AppCompatActivity() {
                     // 모델 입력 설정
                     val inputs = mapOf(
                         "acc" to accTensor,
-                        "ori" to oriTensor
+                        "ori" to oriTensor,
+                        "tran_in" to tranTensor,
+                        "past_frames_in" to pastFramesTensor,
+                        "h_state_in" to hStateTensor,
+                        "c_state_in" to cStateTensor,
+                        "root_y_in" to rootYTensor,
+                        "lfoot_pos_in" to lFootPosTensor,
+                        "rfoot_pos_in" to rFootPosTensor
                     )
 
                     // 모델 추론 실행
@@ -106,7 +141,7 @@ class MainActivity : AppCompatActivity() {
 
                     // 실행 시간 계산 및 로그 출력
                     val duration = endTime - startTime
-//                    Log.d("InferenceTime", "Model inference took $duration ms")
+                    Log.d("InferenceTime", "Model inference took $duration ms")
                     // 실행 시간 저장
                     inferenceStats.addDuration(duration)
                     // 통계 출력
@@ -114,14 +149,28 @@ class MainActivity : AppCompatActivity() {
                     Log.d("InferenceStats", "Average: ${"%.2f".format(avg)} ms, Min: $min ms, Max: $max ms")
 
 
+                    // input Tensor 리소스 정리 (특히 global 변수들은 새로운 값 받기 전에 메모리 해제 필수)
+                    accTensor.close()
+                    oriTensor.close()
+                    tranTensor.close()
+                    pastFramesTensor.close()
+                    hStateTensor.close()
+                    cStateTensor.close()
+                    rootYTensor.close()
+                    lFootPosTensor.close()
+                    rFootPosTensor.close()
 
-                    // 결과 데이터 처리
-                    val poseValue = results["pose"]
-                    val tranValue = results["tran"]
 
-                    // Optional에서 값을 안전하게 추출
-                    val poseTensor = (poseValue as Optional<OnnxTensor>).orElse(null)
-                    val tranTensor = (tranValue as Optional<OnnxTensor>).orElse(null)
+                    // 결과 데이터 처리 - Optional에서 값을 안전하게 추출
+                    val poseTensor = (results["pose"] as Optional<OnnxTensor>).orElse(null)
+                    tranTensor = (results["tran_out"] as Optional<OnnxTensor>).orElse(null)
+                    pastFramesTensor = (results["past_frames_out"] as Optional<OnnxTensor>).orElse(null)
+                    hStateTensor = (results["h_state_out"] as Optional<OnnxTensor>).orElse(null)
+                    cStateTensor = (results["c_state_out"] as Optional<OnnxTensor>).orElse(null)
+                    rootYTensor = (results["root_y_out"] as Optional<OnnxTensor>).orElse(null)
+                    lFootPosTensor = (results["lfoot_pos_out"] as Optional<OnnxTensor>).orElse(null)
+                    rFootPosTensor = (results["rfoot_pos_out"] as Optional<OnnxTensor>).orElse(null)
+
 
                     // poseTensor와 tranTensor가 null이 아닌 경우만 처리
                     if (poseTensor != null && tranTensor != null) {
@@ -139,16 +188,14 @@ class MainActivity : AppCompatActivity() {
                         // UI 업데이트
                         val poseText = pose.joinToString(", ")
                         val tranText = tran.joinToString(", ")
-
-                        // UI 업데이트
-                        runOnUiThread {
-                            textView.text = "Pose: $poseText\n\nTrans: $tranText\n\n"
-                        }
-//                        Log.d("output", "Pose: $poseText Trans: $tranText")
+//                        runOnUiThread {
+//                            textView.text = "Pose: $poseText\n\nTran: $tranText\n\n"
+//                        }
+                        Log.d("output", "Pose: $poseText Tran: $tranText")
 
                         // Tensor 리소스 정리
                         poseTensor.close()
-                        tranTensor.close()
+//                        tranTensor.close()
 
                     } else {
                         // Optional 값이 없는 경우 처리
