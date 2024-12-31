@@ -6,8 +6,11 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import io.socket.client.IO
+import io.socket.client.Socket
 import org.json.JSONArray
 import java.io.File
+import java.net.URISyntaxException
 import java.util.Optional
 import kotlin.concurrent.fixedRateTimer
 
@@ -20,6 +23,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var accData: List<FloatArray>
     private lateinit var oriData: List<FloatArray>
     private var currentIndex = 0 // 현재 반복 인덱스
+    private lateinit var socket: Socket // Socket.IO 클라이언트
 
     // 클래스 인스턴스 생성
     private val inferenceStats = InferenceStats()
@@ -32,6 +36,9 @@ class MainActivity : AppCompatActivity() {
         textView = findViewById(R.id.textView)
 
         try {
+            // Socket.IO 초기화
+            initializeSocket()
+
             // ONNX Runtime 환경 초기화
             onnxEnv = OrtEnvironment.getEnvironment()
 
@@ -56,6 +63,17 @@ class MainActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    private fun initializeSocket() {
+        try {
+            socket = IO.socket("http://143.248.143.65:5555/")
+            socket.connect()
+            Log.d("SocketIO", "Connected to Socket.IO server")
+        } catch (e: URISyntaxException) {
+            e.printStackTrace()
+            Log.e("SocketIO", "Failed to connect to Socket.IO server")
         }
     }
 
@@ -111,6 +129,14 @@ class MainActivity : AppCompatActivity() {
                         val pose = poseTensor.floatBuffer.array()
                         val tran = tranTensor.floatBuffer.array()
 
+
+                        // Socket.IO로 데이터 전송
+                        val s = pose.joinToString(",") + "#" + tran.joinToString(",") + "$"
+                        socket.emit("animation_data", s)
+                        Log.d("SocketIO", "Sent data: $s")
+
+
+                        // UI 업데이트
                         val poseText = pose.joinToString(", ")
                         val tranText = tran.joinToString(", ")
 
@@ -130,10 +156,6 @@ class MainActivity : AppCompatActivity() {
                             textView.text = "Pose or Tran output is empty."
                         }
                     }
-
-                    // Tensor 리소스 정리
-                    accTensor.close()
-                    oriTensor.close()
 
                     // 다음 인덱스로 이동
                     currentIndex++
