@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tranTensor: OnnxTensor
 
     private var currentIndex = 0 // 현재 반복 인덱스
+    private var batchSize = 2 // input batch size
     private lateinit var socket: Socket // Socket.IO 클라이언트
 
     // 클래스 인스턴스 생성
@@ -57,7 +58,7 @@ class MainActivity : AppCompatActivity() {
 
             // 모델 파일 로드
             val assetManager = assets
-            val modelPath = "transpose_net_250103.onnx"
+            val modelPath = "transpose_net_250103_dynamic_batch.onnx"
 //            val modelPath = "simplified_model_250103.onnx"
             val modelBytes = assetManager.open(modelPath).readBytes()
             session = onnxEnv.createSession(modelBytes)
@@ -115,16 +116,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startInferenceLoop() {
-        fixedRateTimer("InferenceTimer", false, 1000L, 1000/100L) {
+        fixedRateTimer("InferenceTimer", false, 1000L, 40L) {
             try {
                 // 현재 인덱스의 데이터를 가져옴
                 if (currentIndex < accData.size) {
-                    val acc = accData[currentIndex]
-                    val ori = oriData[currentIndex]
+//                    val acc = accData[currentIndex]
+//                    val ori = oriData[currentIndex]
+//
+//                    // 1차원 배열을 2차원 배열로 변환 (1 x feature_size) 예: (18,) 대신 (1,18)
+//                    val acc2D = arrayOf(acc)
+//                    val ori2D = arrayOf(ori)
 
-                    // 1차원 배열을 2차원 배열로 변환 (1 x feature_size) 예: (18,) 대신 (1,18)
-                    val acc2D = arrayOf(acc)
-                    val ori2D = arrayOf(ori)
+                    // dynamic batch size 방식
+                    val endIndex = (currentIndex + batchSize).coerceAtMost(accData.size) // 리스트 범위 초과 방지
+                    val acc2D = accData.subList(currentIndex, endIndex).toTypedArray()
+                    val ori2D = oriData.subList(currentIndex, endIndex).toTypedArray()
 
                     // ONNX Tensor로 변환
                     val accTensor = OnnxTensor.createTensor(onnxEnv, acc2D)
@@ -216,7 +222,7 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     // 다음 인덱스로 이동
-                    currentIndex++
+                    currentIndex += batchSize
                 } else {
                     // 반복 종료
                     cancel()
