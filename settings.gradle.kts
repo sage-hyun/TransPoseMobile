@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "TransPose Mobile"
 include(":app")
- 
+include(":opencv")

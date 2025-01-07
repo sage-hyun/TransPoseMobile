@@ -9,6 +9,9 @@ import androidx.appcompat.app.AppCompatActivity
 import io.socket.client.IO
 import io.socket.client.Socket
 import org.json.JSONArray
+import org.opencv.core.CvType
+import org.opencv.core.Mat
+import org.opencv.calib3d.Calib3d
 import java.io.File
 import java.net.URISyntaxException
 import java.util.Optional
@@ -54,8 +57,8 @@ class MainActivity : AppCompatActivity() {
 
             // 모델 파일 로드
             val assetManager = assets
-            val modelPath = "transpose_net_241230.onnx"
-//            val modelPath = "simplified_model_241230.onnx"
+            val modelPath = "transpose_net_250103.onnx"
+//            val modelPath = "simplified_model_250103.onnx"
             val modelBytes = assetManager.open(modelPath).readBytes()
             session = onnxEnv.createSession(modelBytes)
 
@@ -91,6 +94,12 @@ class MainActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    companion object {
+        init {
+            System.loadLibrary("opencv_java4")
         }
     }
 
@@ -175,7 +184,9 @@ class MainActivity : AppCompatActivity() {
                     // poseTensor와 tranTensor가 null이 아닌 경우만 처리
                     if (poseTensor != null && tranTensor != null) {
                         // 텐서를 배열로 변환
-                        val pose = poseTensor.floatBuffer.array()
+                        val poseMatrix = poseTensor.floatBuffer.array()
+                        val pose = rotationMatrixToRodriguesOpenCV(poseMatrix)
+
                         val tran = tranTensor.floatBuffer.array()
 
 
@@ -242,6 +253,38 @@ class MainActivity : AppCompatActivity() {
         }
         return resultList
     }
+
+
+    private fun rotationMatrixToRodriguesOpenCV(matrices: FloatArray): FloatArray {
+        // 총 24개의 3x3 행렬로 구성된 1D 리스트
+        require(matrices.size == 216) { "Input must be a 1D list of size 216 (24 * 3 * 3)." }
+
+        val rodriguesVectors = mutableListOf<Float>()
+
+        for (i in 0 until 24) {
+            // 각 3x3 행렬 추출
+            val rotationMatrix = Mat(3, 3, CvType.CV_32F)
+            for (row in 0 until 3) {
+                for (col in 0 until 3) {
+                    val index = i * 9 + row * 3 + col
+                    rotationMatrix.put(row, col, matrices[index].toDouble())
+                }
+            }
+
+            // Rodrigues 변환 수행
+            val rodVector = Mat()
+            Calib3d.Rodrigues(rotationMatrix, rodVector)
+
+            // 결과를 1D 리스트로 변환하여 저장
+            for (j in 0 until 3) {
+                rodriguesVectors.add(rodVector[j, 0][0].toFloat())
+            }
+        }
+
+        // 1D 결과 리스트로 변환
+        return rodriguesVectors.toFloatArray()
+    }
+
 
     override fun onDestroy() {
         super.onDestroy()
