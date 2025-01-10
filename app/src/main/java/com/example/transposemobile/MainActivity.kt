@@ -16,6 +16,20 @@ import java.io.File
 import java.net.URISyntaxException
 import java.util.Optional
 import kotlin.concurrent.fixedRateTimer
+import android.content.Context
+import io.ktor.server.application.*
+import io.ktor.server.http.content.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
+import io.ktor.server.engine.*
+import io.ktor.server.cio.*
+import android.webkit.WebView
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.headers
+import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.DefaultWebSocketSession
+import java.util.Collections.synchronizedSet
 
 class MainActivity : AppCompatActivity() {
 
@@ -48,6 +62,15 @@ class MainActivity : AppCompatActivity() {
 
         // UI TextView 연결
         textView = findViewById(R.id.textView)
+
+        // Start Ktor server
+        startKtorServer()
+
+        // Setup WebView
+        val webView: WebView = findViewById(R.id.webView)
+        webView.settings.javaScriptEnabled = true
+        webView.loadUrl("http://localhost:5559/unityWebGL")
+
 
         try {
             // Socket.IO 초기화
@@ -291,6 +314,58 @@ class MainActivity : AppCompatActivity() {
         return rodriguesVectors.toFloatArray()
     }
 
+
+    private fun startKtorServer() {
+        embeddedServer(CIO, port = 5559) {
+
+            // WebSocket 연결된 클라이언트를 관리할 Set
+            val clients = synchronizedSet(mutableSetOf<DefaultWebSocketSession>())
+
+            routing {
+                staticResources("/unityWebGL", "static", index = "index.html") {
+                    modify { resource, call ->
+                        if (resource.path.endsWith(".gz")) {
+                            call.response.headers.append(HttpHeaders.ContentEncoding, "gzip")
+                        }
+                    }
+                    contentType { resource ->
+                        if (resource.path.contains("wasm.gz")) {
+                            ContentType.Application.Wasm
+                        } else null
+                    }
+                }
+
+                // WebSocket connection to handle socket communication
+//                webSocket("/") {
+//
+//                    // 새로운 클라이언트 연결 시 추가
+//                    clients.add(this)
+//
+//                    // 클라이언트로부터 메시지를 받으면 처리
+//                    for (frame in incoming) {
+//                        when (frame) {
+//                            is Frame.Text -> {
+//                                val receivedMessage = frame.readText()
+//                                println("Received message: $receivedMessage")
+//                                // 받은 메시지를 클라이언트로 다시 전송
+//                                send("Echo: $receivedMessage")
+//                            }
+//                        }
+//                    }
+//                }
+
+                // Serve HTML file
+//                get("/") {
+//                    val htmlContent = readAssetFile(applicationContext, "unityWebGL/index_origin.html")
+//                    call.respondText(htmlContent, contentType = io.ktor.http.ContentType.Text.Html)
+//                }
+            }
+        }.start(wait = false)
+    }
+
+//    private fun readAssetFile(context: Context, fileName: String): String {
+//        return context.assets.open(fileName).bufferedReader().use { it.readText() }
+//    }
 
     override fun onDestroy() {
         super.onDestroy()
