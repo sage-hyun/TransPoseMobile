@@ -33,6 +33,10 @@ android {
     kotlinOptions {
         jvmTarget = "1.8"
     }
+    packaging {
+        resources.excludes.add("META-INF/INDEX.LIST")
+        resources.excludes.add("META-INF/io.netty.versions.properties")
+    }
 }
 
 dependencies {
@@ -47,4 +51,14 @@ dependencies {
 
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.16.0")
     implementation("io.socket:socket.io-client:2.0.1")
+
+    implementation("io.ktor:ktor-server-core:2.3.4")
+//    implementation("io.ktor:ktor-server-netty:2.3.4")
+    implementation("io.ktor:ktor-server-cio:2.3.4") // Lightweight alternative to Netty
+    implementation("io.ktor:ktor-server-websockets:2.3.4")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.4")
+    implementation("io.ktor:ktor-server-content-negotiation:2.3.4")
+    implementation("io.ktor:ktor-server-call-logging:2.3.4")
+
 }
+
