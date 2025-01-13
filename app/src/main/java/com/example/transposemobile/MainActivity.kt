@@ -6,30 +6,23 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import io.socket.client.IO
-import io.socket.client.Socket
 import org.json.JSONArray
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.calib3d.Calib3d
 import java.io.File
-import java.net.URISyntaxException
 import java.util.Optional
-import kotlin.concurrent.fixedRateTimer
-import android.content.Context
 import io.ktor.server.application.*
 import io.ktor.server.http.content.*
-import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.engine.*
 import io.ktor.server.cio.*
 import android.webkit.WebView
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
-import io.ktor.http.headers
-import io.ktor.server.websocket.webSocket
-import io.ktor.websocket.DefaultWebSocketSession
-import java.util.Collections.synchronizedSet
+import io.ktor.server.websocket.*
+import io.ktor.websocket.Frame
+import kotlinx.coroutines.delay
 
 class MainActivity : AppCompatActivity() {
 
@@ -50,8 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tranTensor: OnnxTensor
 
     private var currentIndex = 0 // 현재 반복 인덱스
-    private var batchSize = 2 // input batch size
-    private lateinit var socket: Socket // Socket.IO 클라이언트
+    private var batchSize = 3 // input batch size
 
     // 클래스 인스턴스 생성
     private val inferenceStats = InferenceStats()
@@ -63,19 +55,7 @@ class MainActivity : AppCompatActivity() {
         // UI TextView 연결
         textView = findViewById(R.id.textView)
 
-        // Start Ktor server
-        startKtorServer()
-
-        // Setup WebView
-        val webView: WebView = findViewById(R.id.webView)
-        webView.settings.javaScriptEnabled = true
-        webView.loadUrl("http://localhost:5559/unityWebGL")
-
-
         try {
-            // Socket.IO 초기화
-            initializeSocket()
-
             // ONNX Runtime 환경 초기화
             onnxEnv = OrtEnvironment.getEnvironment()
 
@@ -113,12 +93,17 @@ class MainActivity : AppCompatActivity() {
             lFootPosTensor = OnnxTensor.createTensor(onnxEnv, lFootPos)
             rFootPosTensor = OnnxTensor.createTensor(onnxEnv, rFootPos)
 
-            // 1초 간격으로 추론 실행
-            startInferenceLoop()
-
         } catch (e: Exception) {
             e.printStackTrace()
         }
+
+        // Start Ktor server
+        startKtorServer()
+
+        // Setup WebView
+        val webView: WebView = findViewById(R.id.webView)
+        webView.settings.javaScriptEnabled = true
+        webView.loadUrl("http://localhost:5559/unityWebGL")
     }
 
     companion object {
@@ -127,136 +112,153 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun initializeSocket() {
+
+    private fun getInferenceResult(): String? {
         try {
-            socket = IO.socket("http://143.248.143.65:5555/")
-            socket.connect()
-            Log.d("SocketIO", "Connected to Socket.IO server")
-        } catch (e: URISyntaxException) {
-            e.printStackTrace()
-            Log.e("SocketIO", "Failed to connect to Socket.IO server")
-        }
-    }
+            // 현재 인덱스의 데이터를 가져옴
+            if (currentIndex < accData.size) {
 
-    private fun startInferenceLoop() {
-        fixedRateTimer("InferenceTimer", false, 1000L, 40L) {
-            try {
-                // 현재 인덱스의 데이터를 가져옴
-                if (currentIndex < accData.size) {
-//                    val acc = accData[currentIndex]
-//                    val ori = oriData[currentIndex]
-//
-//                    // 1차원 배열을 2차원 배열로 변환 (1 x feature_size) 예: (18,) 대신 (1,18)
-//                    val acc2D = arrayOf(acc)
-//                    val ori2D = arrayOf(ori)
+                // dynamic batch size 방식
+                val endIndex = (currentIndex + batchSize).coerceAtMost(accData.size) // 리스트 범위 초과 방지
+                val acc2D = accData.subList(currentIndex, endIndex).toTypedArray()
+                val ori2D = oriData.subList(currentIndex, endIndex).toTypedArray()
 
-                    // dynamic batch size 방식
-                    val endIndex = (currentIndex + batchSize).coerceAtMost(accData.size) // 리스트 범위 초과 방지
-                    val acc2D = accData.subList(currentIndex, endIndex).toTypedArray()
-                    val ori2D = oriData.subList(currentIndex, endIndex).toTypedArray()
+                // 다음 인덱스로 이동
+                currentIndex += batchSize
 
-                    // ONNX Tensor로 변환
-                    val accTensor = OnnxTensor.createTensor(onnxEnv, acc2D)
-                    val oriTensor = OnnxTensor.createTensor(onnxEnv, ori2D)
+                // ONNX Tensor로 변환
+                val accTensor = OnnxTensor.createTensor(onnxEnv, acc2D)
+                val oriTensor = OnnxTensor.createTensor(onnxEnv, ori2D)
 
-                    // 모델 입력 설정
-                    val inputs = mapOf(
-                        "acc" to accTensor,
-                        "ori" to oriTensor,
-                        "tran_in" to tranTensor,
-                        "past_frames_in" to pastFramesTensor,
-                        "h_state_in" to hStateTensor,
-                        "c_state_in" to cStateTensor,
-                        "root_y_in" to rootYTensor,
-                        "lfoot_pos_in" to lFootPosTensor,
-                        "rfoot_pos_in" to rFootPosTensor
-                    )
+                // 모델 입력 설정
+                val inputs = mapOf(
+                    "acc" to accTensor,
+                    "ori" to oriTensor,
+                    "tran_in" to tranTensor,
+                    "past_frames_in" to pastFramesTensor,
+                    "h_state_in" to hStateTensor,
+                    "c_state_in" to cStateTensor,
+                    "root_y_in" to rootYTensor,
+                    "lfoot_pos_in" to lFootPosTensor,
+                    "rfoot_pos_in" to rFootPosTensor
+                )
 
-                    // 모델 추론 실행
-                    val startTime = System.currentTimeMillis() // 시작 시간 기록
-                    val results = session.run(inputs)          // 추론 실행
-                    val endTime = System.currentTimeMillis()   // 종료 시간 기록
+                // 모델 추론 실행
+                val startTime = System.currentTimeMillis() // 시작 시간 기록
+                val results = session.run(inputs)          // 추론 실행
+                val endTime = System.currentTimeMillis()   // 종료 시간 기록
 
-                    // 실행 시간 계산 및 로그 출력
-                    val duration = endTime - startTime
-                    Log.d("InferenceTime", "Model inference took $duration ms")
-                    // 실행 시간 저장
-                    inferenceStats.addDuration(duration)
-                    // 통계 출력
-                    val (avg, min, max) = inferenceStats.getStats()
-                    Log.d("InferenceStats", "Average: ${"%.2f".format(avg)} ms, Min: $min ms, Max: $max ms")
+                // 실행 시간 계산 및 로그 출력
+                val duration = endTime - startTime
+                Log.d("InferenceTime", "Model inference took $duration ms")
+                // 실행 시간 저장
+                inferenceStats.addDuration(duration)
+                // 통계 출력
+                val (avg, min, max) = inferenceStats.getStats()
+                Log.d("InferenceStats", "Average: ${"%.2f".format(avg)} ms, Min: $min ms, Max: $max ms")
 
 
-                    // input Tensor 리소스 정리 (특히 global 변수들은 새로운 값 받기 전에 메모리 해제 필수)
-                    accTensor.close()
-                    oriTensor.close()
-                    tranTensor.close()
-                    pastFramesTensor.close()
-                    hStateTensor.close()
-                    cStateTensor.close()
-                    rootYTensor.close()
-                    lFootPosTensor.close()
-                    rFootPosTensor.close()
+                // input Tensor 리소스 정리 (특히 global 변수들은 새로운 값 받기 전에 메모리 해제 필수)
+                accTensor.close()
+                oriTensor.close()
+                tranTensor.close()
+                pastFramesTensor.close()
+                hStateTensor.close()
+                cStateTensor.close()
+                rootYTensor.close()
+                lFootPosTensor.close()
+                rFootPosTensor.close()
 
 
-                    // 결과 데이터 처리 - Optional에서 값을 안전하게 추출
-                    val poseTensor = (results["pose"] as Optional<OnnxTensor>).orElse(null)
-                    tranTensor = (results["tran_out"] as Optional<OnnxTensor>).orElse(null)
-                    pastFramesTensor = (results["past_frames_out"] as Optional<OnnxTensor>).orElse(null)
-                    hStateTensor = (results["h_state_out"] as Optional<OnnxTensor>).orElse(null)
-                    cStateTensor = (results["c_state_out"] as Optional<OnnxTensor>).orElse(null)
-                    rootYTensor = (results["root_y_out"] as Optional<OnnxTensor>).orElse(null)
-                    lFootPosTensor = (results["lfoot_pos_out"] as Optional<OnnxTensor>).orElse(null)
-                    rFootPosTensor = (results["rfoot_pos_out"] as Optional<OnnxTensor>).orElse(null)
+                // 결과 데이터 처리 - Optional에서 값을 안전하게 추출
+                val poseTensor = (results["pose"] as Optional<OnnxTensor>).orElse(null)
+                tranTensor = (results["tran_out"] as Optional<OnnxTensor>).orElse(null)
+                pastFramesTensor = (results["past_frames_out"] as Optional<OnnxTensor>).orElse(null)
+                hStateTensor = (results["h_state_out"] as Optional<OnnxTensor>).orElse(null)
+                cStateTensor = (results["c_state_out"] as Optional<OnnxTensor>).orElse(null)
+                rootYTensor = (results["root_y_out"] as Optional<OnnxTensor>).orElse(null)
+                lFootPosTensor = (results["lfoot_pos_out"] as Optional<OnnxTensor>).orElse(null)
+                rFootPosTensor = (results["rfoot_pos_out"] as Optional<OnnxTensor>).orElse(null)
 
 
-                    // poseTensor와 tranTensor가 null이 아닌 경우만 처리
-                    if (poseTensor != null && tranTensor != null) {
-                        // 텐서를 배열로 변환
-                        val poseMatrix = poseTensor.floatBuffer.array()
-                        val pose = rotationMatrixToRodriguesOpenCV(poseMatrix)
+                // poseTensor와 tranTensor가 null이 아닌 경우만 처리
+                if (poseTensor != null && tranTensor != null) {
+                    // 텐서를 배열로 변환
+                    val poseMatrix = poseTensor.floatBuffer.array()
+                    val pose = rotationMatrixToRodriguesOpenCV(poseMatrix)
 
-                        val tran = tranTensor.floatBuffer.array()
+                    val tran = tranTensor.floatBuffer.array()
+
+                    // Tensor 리소스 정리
+                    poseTensor.close()
+//                        tranTensor.close()
+
+                    // Socket.IO로 데이터 전송
+                    val s = pose.joinToString(",") + "#" + tran.joinToString(",") + "$"
+                    return s
+//                    socket.emit("animation_data", s)
+//                    Log.d("SocketIO", "Sent data: $s")
 
 
-                        // Socket.IO로 데이터 전송
-                        val s = pose.joinToString(",") + "#" + tran.joinToString(",") + "$"
-                        socket.emit("animation_data", s)
-                        Log.d("SocketIO", "Sent data: $s")
 
-
-                        // UI 업데이트
-                        val poseText = pose.joinToString(", ")
-                        val tranText = tran.joinToString(", ")
+                    // UI 업데이트
+//                    val poseText = pose.joinToString(", ")
+//                    val tranText = tran.joinToString(", ")
 //                        runOnUiThread {
 //                            textView.text = "Pose: $poseText\n\nTran: $tranText\n\n"
 //                        }
-                        Log.d("output", "Pose: $poseText Tran: $tranText")
+//                    Log.d("output", "Pose: $poseText Tran: $tranText")
 
-                        // Tensor 리소스 정리
-                        poseTensor.close()
-//                        tranTensor.close()
-
-                    } else {
-                        // Optional 값이 없는 경우 처리
-                        runOnUiThread {
-                            textView.text = "Pose or Tran output is empty."
-                        }
-                    }
-
-                    // 다음 인덱스로 이동
-                    currentIndex += batchSize
                 } else {
-                    // 반복 종료
-                    cancel()
+                    // Optional 값이 없는 경우 처리
+                    runOnUiThread {
+                        textView.text = "Pose or Tran output is empty."
+                    }
                 }
 
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } else {
+                // 반복 종료
+                Log.d("getInferenceResult", "finished reading.")
             }
+
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+        return null
     }
 
+    private fun startKtorServer() {
+        embeddedServer(CIO, port = 5559) {
+            install(WebSockets) // WebSocket 플러그인 설치
+            routing {
+                staticResources("/unityWebGL", "static", index = "index.html") {
+                    modify { resource, call ->
+                        if (resource.path.endsWith(".gz")) {
+                            call.response.headers.append(HttpHeaders.ContentEncoding, "gzip")
+                        }
+                    }
+                    contentType { resource ->
+                        if (resource.path.contains("wasm.gz")) {
+                            ContentType.Application.Wasm
+                        } else null
+                    }
+                }
+
+                // WebSocket connection to handle socket communication
+                webSocket("/ws") {
+
+                    currentIndex = 0
+                    while (true) {
+                        val msg = getInferenceResult()
+                        if(msg != null) {
+                            send(Frame.Text(msg))
+                        }
+                        delay(10) // 메시지 전송 간격 (밀리초)
+                    }
+                }
+            }
+        }.start(wait = false)
+    }
 
     // Helper: JSON 파일을 읽고 FloatArray 리스트로 변환
     private fun loadJsonArray(fileName: String): List<FloatArray> {
@@ -313,59 +315,6 @@ class MainActivity : AppCompatActivity() {
         // 1D 결과 리스트로 변환
         return rodriguesVectors.toFloatArray()
     }
-
-
-    private fun startKtorServer() {
-        embeddedServer(CIO, port = 5559) {
-
-            // WebSocket 연결된 클라이언트를 관리할 Set
-            val clients = synchronizedSet(mutableSetOf<DefaultWebSocketSession>())
-
-            routing {
-                staticResources("/unityWebGL", "static", index = "index.html") {
-                    modify { resource, call ->
-                        if (resource.path.endsWith(".gz")) {
-                            call.response.headers.append(HttpHeaders.ContentEncoding, "gzip")
-                        }
-                    }
-                    contentType { resource ->
-                        if (resource.path.contains("wasm.gz")) {
-                            ContentType.Application.Wasm
-                        } else null
-                    }
-                }
-
-                // WebSocket connection to handle socket communication
-//                webSocket("/") {
-//
-//                    // 새로운 클라이언트 연결 시 추가
-//                    clients.add(this)
-//
-//                    // 클라이언트로부터 메시지를 받으면 처리
-//                    for (frame in incoming) {
-//                        when (frame) {
-//                            is Frame.Text -> {
-//                                val receivedMessage = frame.readText()
-//                                println("Received message: $receivedMessage")
-//                                // 받은 메시지를 클라이언트로 다시 전송
-//                                send("Echo: $receivedMessage")
-//                            }
-//                        }
-//                    }
-//                }
-
-                // Serve HTML file
-//                get("/") {
-//                    val htmlContent = readAssetFile(applicationContext, "unityWebGL/index_origin.html")
-//                    call.respondText(htmlContent, contentType = io.ktor.http.ContentType.Text.Html)
-//                }
-            }
-        }.start(wait = false)
-    }
-
-//    private fun readAssetFile(context: Context, fileName: String): String {
-//        return context.assets.open(fileName).bufferedReader().use { it.readText() }
-//    }
 
     override fun onDestroy() {
         super.onDestroy()
