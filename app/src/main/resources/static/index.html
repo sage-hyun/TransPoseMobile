@@ -23,7 +23,7 @@
         <div id="unity-build-title">My project</div>
       </div>
     </div>
-    <button id="sendDataButton">Send Data to Unity</button> <!-- 버튼 추가 -->
+    <button id="connectBtn">Connect to WebSocket</button> <!-- 버튼 추가 -->
 
     <script>
       var container = document.querySelector("#unity-container");
@@ -93,19 +93,41 @@
             unityInstance.SetFullscreen(1);
           };
 
-          // 버튼 클릭 시 데이터를 Flask 서버에서 가져와 Unity로 전송
-          function sendDataToUnity() {
-            fetch("http://143.248.135.65:5552/get_animation_data")
-              .then(response => response.json())
-              .then(data => {
-                // 데이터 전송: Unity의 'RecvMotion' 객체에 'ReceiveDataFromServer' 메서드로 데이터 전달
-                unityInstance.SendMessage('RecvMotion', 'ReceiveDataFromServer', JSON.stringify(data));
-              })
-              .catch(error => console.error("Failed to fetch data:", error));
-          }
+          // // 버튼 클릭 시 데이터를 Flask 서버에서 가져와 Unity로 전송
+          // function sendDataToUnity() {
+          //   fetch("http://143.248.135.65:5552/get_animation_data")
+          //     .then(response => response.json())
+          //     .then(data => {
+          //       // 데이터 전송: Unity의 'RecvMotion' 객체에 'ReceiveDataFromServer' 메서드로 데이터 전달
+          //       unityInstance.SendMessage('RecvMotion', 'ReceiveDataFromServer', JSON.stringify(data));
+          //     })
+          //     .catch(error => console.error("Failed to fetch data:", error));
+          // }
 
-          // 버튼에 이벤트 리스너 추가
-          document.getElementById("sendDataButton").onclick = sendDataToUnity;
+          // // 버튼에 이벤트 리스너 추가
+          // document.getElementById("sendDataButton").onclick = sendDataToUnity;
+
+          // WebSocket 연결 설정
+          document.getElementById("connectBtn").addEventListener("click", () => {
+              socket = new WebSocket("ws://localhost:5559/ws"); // Ktor 서버 WebSocket 주소
+
+              socket.onopen = () => {
+                  console.log("Connected to WebSocket server.");
+              };
+
+              socket.onmessage = (event) => {
+                // console.log(`Received: ${event.data}`);
+                unityInstance.SendMessage('RecvMotion', 'ReceiveDataFromServer', event.data);
+              };
+
+              socket.onerror = (error) => {
+                  console.error(`Error: ${error.message}`);
+              };
+
+              socket.onclose = () => {
+                console.log("WebSocket connection closed.");
+              };
+          });
 
         }).catch((message) => {
           alert(message);
