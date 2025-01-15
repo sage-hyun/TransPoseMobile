@@ -75,24 +75,6 @@ class MainActivity : AppCompatActivity() {
                 throw IllegalArgumentException("acc.json과 ori.json의 shape[0] 값이 다릅니다.")
             }
 
-            // 초기 값 설정
-            val tran = FloatArray(3) { 0f }             // 3D 벡터, 모두 0으로 초기화
-            val pastFrames = Array(26) { FloatArray(72) { 0f } } // 26x72 크기의 배열, 모두 0으로 초기화
-            val hState = Array(2) { FloatArray(256) { 0f } }     // 2x256 크기의 배열, 모두 0으로 초기화
-            val cState = Array(2) { FloatArray(256) { 0f } }     // 2x256 크기의 배열, 모두 0으로 초기화
-            val rootY = floatArrayOf(0.0f)              // 단일 값
-            val lFootPos = floatArrayOf(0.1283f, -0.9559f, 0.0750f) // 3D 벡터
-            val rFootPos = floatArrayOf(-0.1194f, -0.9564f, 0.0774f) // 3D 벡터
-
-            // ONNX Tensor로 변환
-            tranTensor = OnnxTensor.createTensor(onnxEnv, tran)
-            pastFramesTensor = OnnxTensor.createTensor(onnxEnv, pastFrames)
-            hStateTensor = OnnxTensor.createTensor(onnxEnv, hState)
-            cStateTensor = OnnxTensor.createTensor(onnxEnv, cState)
-            rootYTensor = OnnxTensor.createTensor(onnxEnv, rootY)
-            lFootPosTensor = OnnxTensor.createTensor(onnxEnv, lFootPos)
-            rFootPosTensor = OnnxTensor.createTensor(onnxEnv, rFootPos)
-
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -112,6 +94,34 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun initTensors() {
+        // 혹시 이미 Tensor가 있다면 메모리 해제
+        if (::tranTensor.isInitialized) { tranTensor.close() }
+        if (::pastFramesTensor.isInitialized) { pastFramesTensor.close() }
+        if (::hStateTensor.isInitialized) { hStateTensor.close() }
+        if (::cStateTensor.isInitialized) { cStateTensor.close() }
+        if (::rootYTensor.isInitialized) { rootYTensor.close() }
+        if (::lFootPosTensor.isInitialized) { lFootPosTensor.close() }
+        if (::rFootPosTensor.isInitialized) { rFootPosTensor.close() }
+
+        // 초기 값 설정
+        val tran = FloatArray(3) { 0f }             // 3D 벡터, 모두 0으로 초기화
+        val pastFrames = Array(26) { FloatArray(72) { 0f } } // 26x72 크기의 배열, 모두 0으로 초기화
+        val hState = Array(2) { FloatArray(256) { 0f } }     // 2x256 크기의 배열, 모두 0으로 초기화
+        val cState = Array(2) { FloatArray(256) { 0f } }     // 2x256 크기의 배열, 모두 0으로 초기화
+        val rootY = floatArrayOf(0.0f)              // 단일 값
+        val lFootPos = floatArrayOf(0.1283f, -0.9559f, 0.0750f) // 3D 벡터
+        val rFootPos = floatArrayOf(-0.1194f, -0.9564f, 0.0774f) // 3D 벡터
+
+        // ONNX Tensor로 변환
+        tranTensor = OnnxTensor.createTensor(onnxEnv, tran)
+        pastFramesTensor = OnnxTensor.createTensor(onnxEnv, pastFrames)
+        hStateTensor = OnnxTensor.createTensor(onnxEnv, hState)
+        cStateTensor = OnnxTensor.createTensor(onnxEnv, cState)
+        rootYTensor = OnnxTensor.createTensor(onnxEnv, rootY)
+        lFootPosTensor = OnnxTensor.createTensor(onnxEnv, lFootPos)
+        rFootPosTensor = OnnxTensor.createTensor(onnxEnv, rFootPos)
+    }
 
     private fun getInferenceResult(): String? {
         try {
@@ -246,13 +256,13 @@ class MainActivity : AppCompatActivity() {
 
                 // WebSocket connection to handle socket communication
                 webSocket("/ws") {
-
+                    initTensors()
                     currentIndex = 0
                     while (true) {
                         val msg = getInferenceResult()
                         if(msg != null) {
                             send(Frame.Text(msg))
-                        }
+                        } else break
                         delay(10) // 메시지 전송 간격 (밀리초)
                     }
                 }
