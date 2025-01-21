@@ -1,91 +1,106 @@
 package com.example.transposemobile
 
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
+import android.annotation.SuppressLint
 import android.os.Bundle
-import android.util.Log
-import android.widget.TextView
+import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import org.json.JSONArray
-import org.opencv.core.CvType
-import org.opencv.core.Mat
-import org.opencv.calib3d.Calib3d
-import java.io.File
-import java.util.Optional
-import io.ktor.server.application.*
-import io.ktor.server.http.content.*
-import io.ktor.server.routing.*
-import io.ktor.server.engine.*
-import io.ktor.server.cio.*
 import android.webkit.WebView
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.server.websocket.*
-import io.ktor.websocket.Frame
-import kotlinx.coroutines.delay
+import android.widget.Button
+import android.widget.TextView
+import com.google.android.material.switchmaterial.SwitchMaterial
+
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var textView: TextView
-    private lateinit var session: ai.onnxruntime.OrtSession
-    private lateinit var onnxEnv: OrtEnvironment
-
-    private lateinit var accData: List<FloatArray>
-    private lateinit var oriData: List<FloatArray>
-
-    // Stateful input/outputs
-    private lateinit var pastFramesTensor: OnnxTensor
-    private lateinit var hStateTensor: OnnxTensor
-    private lateinit var cStateTensor: OnnxTensor
-    private lateinit var rootYTensor: OnnxTensor
-    private lateinit var lFootPosTensor: OnnxTensor
-    private lateinit var rFootPosTensor: OnnxTensor
-    private lateinit var tranTensor: OnnxTensor
-
-    private var currentIndex = 0 // 현재 반복 인덱스
-    private var batchSize = 3 // input batch size
 
     // 클래스 인스턴스 생성
-    private val inferenceStats = InferenceStats()
+    private var imuDataBuffer: ImuDataBuffer = ImuDataBuffer()
+    private lateinit var imuDataProducer: ImuDataProducer
+    private lateinit var onnxManager: OnnxManager
 
+    private lateinit var socketIoManager: SocketIoManager
+    private lateinit var ktorServerManager: KtorServerManager
+
+
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // UI TextView 연결
-        textView = findViewById(R.id.textView)
-
         try {
-            // ONNX Runtime 환경 초기화
-            onnxEnv = OrtEnvironment.getEnvironment()
+            // elements
+            val startBtn: Button = findViewById(R.id.startButton)
+            val stopBtn: Button = findViewById(R.id.stopButton)
+            val switchToggle: SwitchMaterial = findViewById(R.id.switchToggle)
+            val webView: WebView = findViewById(R.id.webView)
 
-            // 모델 파일 로드
-            val assetManager = assets
+            // imuDataProducer 초기화
+            imuDataProducer = ImuDataProducer(imuDataBuffer, assets, filesDir)
+
+            // ONNX 초기화
             val modelPath = "transpose_net_250103_dynamic_batch.onnx"
-//            val modelPath = "simplified_model_250103.onnx"
-            val modelBytes = assetManager.open(modelPath).readBytes()
-            session = onnxEnv.createSession(modelBytes)
+            onnxManager = OnnxManager(imuDataBuffer, assets, modelPath)
+            onnxManager.batchSize = 1
 
-            // JSON 데이터 로드
-            accData = loadJsonArray("acc_240521.json")
-            oriData = loadJsonArray("ori_240521.json")
+            // socketIO 초기화
+            socketIoManager = SocketIoManager(imuDataProducer, onnxManager)
 
-            // 두 데이터의 길이가 다르면 예외 처리
-            if (accData.size != oriData.size) {
-                throw IllegalArgumentException("acc.json과 ori.json의 shape[0] 값이 다릅니다.")
+            // Ktor 초기화
+            ktorServerManager = KtorServerManager(imuDataProducer, onnxManager)
+
+            fun startBtnCommonAction() {
+                startBtn.visibility = View.GONE
+                stopBtn.visibility = View.VISIBLE
+                switchToggle.isEnabled = false // Switch 비활성화
+                switchToggle.alpha = 0.5f      // 투명도를 줄여 비활성화 표시
+                imuDataProducer.startBuffering()
+            }
+            fun stopBtnCommonAction() {
+                stopBtn.visibility = View.GONE
+                startBtn.visibility = View.VISIBLE
+                switchToggle.isEnabled = true
+                switchToggle.alpha = 1f
+                imuDataProducer.stopBuffering()
+            }
+
+            // 토글 액션
+            switchToggle.setOnCheckedChangeListener { _, isChecked ->
+                if (!isChecked) {
+                    webView.visibility = View.GONE
+                    ktorServerManager.stopServer()
+
+                    startBtn.setOnClickListener {
+                        startBtnCommonAction()
+                        socketIoManager.startInference()
+                    }
+                    stopBtn.setOnClickListener {
+                        stopBtnCommonAction()
+                        socketIoManager.stopInference()
+                    }
+
+                } else {
+                    ktorServerManager.startServer()
+
+                    // Setup WebView
+                    webView.visibility = View.VISIBLE
+                    webView.settings.javaScriptEnabled = true
+                    webView.loadUrl("http://localhost:5559/unityWebGL")
+
+                    startBtn.setOnClickListener {
+                        startBtnCommonAction()
+                        webView.loadUrl("javascript:document.getElementById('connectBtn').click();")
+                    }
+                    stopBtn.setOnClickListener {
+                        stopBtnCommonAction()
+                        webView.loadUrl("javascript:document.getElementById('disconnectBtn').click();")
+                    }
+                }
             }
 
         } catch (e: Exception) {
             e.printStackTrace()
         }
-
-        // Start Ktor server
-        startKtorServer()
-
-        // Setup WebView
-        val webView: WebView = findViewById(R.id.webView)
-        webView.settings.javaScriptEnabled = true
-        webView.loadUrl("http://localhost:5559/unityWebGL")
     }
 
     companion object {
@@ -94,259 +109,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun initTensors() {
-        // 혹시 이미 Tensor가 있다면 메모리 해제
-        if (::tranTensor.isInitialized) { tranTensor.close() }
-        if (::pastFramesTensor.isInitialized) { pastFramesTensor.close() }
-        if (::hStateTensor.isInitialized) { hStateTensor.close() }
-        if (::cStateTensor.isInitialized) { cStateTensor.close() }
-        if (::rootYTensor.isInitialized) { rootYTensor.close() }
-        if (::lFootPosTensor.isInitialized) { lFootPosTensor.close() }
-        if (::rFootPosTensor.isInitialized) { rFootPosTensor.close() }
-
-        // 초기 값 설정
-        val tran = FloatArray(3) { 0f }             // 3D 벡터, 모두 0으로 초기화
-        val pastFrames = Array(26) { FloatArray(72) { 0f } } // 26x72 크기의 배열, 모두 0으로 초기화
-        val hState = Array(2) { FloatArray(256) { 0f } }     // 2x256 크기의 배열, 모두 0으로 초기화
-        val cState = Array(2) { FloatArray(256) { 0f } }     // 2x256 크기의 배열, 모두 0으로 초기화
-        val rootY = floatArrayOf(0.0f)              // 단일 값
-        val lFootPos = floatArrayOf(0.1283f, -0.9559f, 0.0750f) // 3D 벡터
-        val rFootPos = floatArrayOf(-0.1194f, -0.9564f, 0.0774f) // 3D 벡터
-
-        // ONNX Tensor로 변환
-        tranTensor = OnnxTensor.createTensor(onnxEnv, tran)
-        pastFramesTensor = OnnxTensor.createTensor(onnxEnv, pastFrames)
-        hStateTensor = OnnxTensor.createTensor(onnxEnv, hState)
-        cStateTensor = OnnxTensor.createTensor(onnxEnv, cState)
-        rootYTensor = OnnxTensor.createTensor(onnxEnv, rootY)
-        lFootPosTensor = OnnxTensor.createTensor(onnxEnv, lFootPos)
-        rFootPosTensor = OnnxTensor.createTensor(onnxEnv, rFootPos)
-    }
-
-    private fun getInferenceResult(): String? {
-        try {
-            // 현재 인덱스의 데이터를 가져옴
-            if (currentIndex < accData.size) {
-
-                // dynamic batch size 방식
-                val endIndex = (currentIndex + batchSize).coerceAtMost(accData.size) // 리스트 범위 초과 방지
-                val acc2D = accData.subList(currentIndex, endIndex).toTypedArray()
-                val ori2D = oriData.subList(currentIndex, endIndex).toTypedArray()
-
-                // 다음 인덱스로 이동
-                currentIndex += batchSize
-
-                // ONNX Tensor로 변환
-                val accTensor = OnnxTensor.createTensor(onnxEnv, acc2D)
-                val oriTensor = OnnxTensor.createTensor(onnxEnv, ori2D)
-
-                // 모델 입력 설정
-                val inputs = mapOf(
-                    "acc" to accTensor,
-                    "ori" to oriTensor,
-                    "tran_in" to tranTensor,
-                    "past_frames_in" to pastFramesTensor,
-                    "h_state_in" to hStateTensor,
-                    "c_state_in" to cStateTensor,
-                    "root_y_in" to rootYTensor,
-                    "lfoot_pos_in" to lFootPosTensor,
-                    "rfoot_pos_in" to rFootPosTensor
-                )
-
-                // 모델 추론 실행
-                val startTime = System.currentTimeMillis() // 시작 시간 기록
-                val results = session.run(inputs)          // 추론 실행
-                val endTime = System.currentTimeMillis()   // 종료 시간 기록
-
-                // 실행 시간 계산 및 로그 출력
-                val duration = endTime - startTime
-                Log.d("InferenceTime", "Model inference took $duration ms")
-                // 실행 시간 저장
-                inferenceStats.addDuration(duration)
-                // 통계 출력
-                val (avg, min, max) = inferenceStats.getStats()
-                Log.d("InferenceStats", "Average: ${"%.2f".format(avg)} ms, Min: $min ms, Max: $max ms")
-
-
-                // input Tensor 리소스 정리 (특히 global 변수들은 새로운 값 받기 전에 메모리 해제 필수)
-                accTensor.close()
-                oriTensor.close()
-                tranTensor.close()
-                pastFramesTensor.close()
-                hStateTensor.close()
-                cStateTensor.close()
-                rootYTensor.close()
-                lFootPosTensor.close()
-                rFootPosTensor.close()
-
-
-                // 결과 데이터 처리 - Optional에서 값을 안전하게 추출
-                val poseTensor = (results["pose"] as Optional<OnnxTensor>).orElse(null)
-                tranTensor = (results["tran_out"] as Optional<OnnxTensor>).orElse(null)
-                pastFramesTensor = (results["past_frames_out"] as Optional<OnnxTensor>).orElse(null)
-                hStateTensor = (results["h_state_out"] as Optional<OnnxTensor>).orElse(null)
-                cStateTensor = (results["c_state_out"] as Optional<OnnxTensor>).orElse(null)
-                rootYTensor = (results["root_y_out"] as Optional<OnnxTensor>).orElse(null)
-                lFootPosTensor = (results["lfoot_pos_out"] as Optional<OnnxTensor>).orElse(null)
-                rFootPosTensor = (results["rfoot_pos_out"] as Optional<OnnxTensor>).orElse(null)
-
-
-                // poseTensor와 tranTensor가 null이 아닌 경우만 처리
-                if (poseTensor != null && tranTensor != null) {
-                    // 텐서를 배열로 변환
-                    val poseMatrix = poseTensor.floatBuffer.array()
-                    val pose = rotationMatrixToRodriguesOpenCV(poseMatrix)
-
-                    val tran = tranTensor.floatBuffer.array()
-
-                    // Tensor 리소스 정리
-                    poseTensor.close()
-//                        tranTensor.close()
-
-                    // Socket.IO로 데이터 전송
-                    val s = pose.joinToString(",") + "#" + tran.joinToString(",") + "$"
-                    return s
-//                    socket.emit("animation_data", s)
-//                    Log.d("SocketIO", "Sent data: $s")
-
-
-
-                    // UI 업데이트
-//                    val poseText = pose.joinToString(", ")
-//                    val tranText = tran.joinToString(", ")
-//                        runOnUiThread {
-//                            textView.text = "Pose: $poseText\n\nTran: $tranText\n\n"
-//                        }
-//                    Log.d("output", "Pose: $poseText Tran: $tranText")
-
-                } else {
-                    // Optional 값이 없는 경우 처리
-                    runOnUiThread {
-                        textView.text = "Pose or Tran output is empty."
-                    }
-                }
-
-            } else {
-                // 반복 종료
-                Log.d("getInferenceResult", "finished reading.")
-            }
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return null
-    }
-
-    private fun startKtorServer() {
-        embeddedServer(CIO, port = 5559) {
-            install(WebSockets) // WebSocket 플러그인 설치
-            routing {
-                staticResources("/unityWebGL", "static", index = "index.html") {
-                    modify { resource, call ->
-                        if (resource.path.endsWith(".gz")) {
-                            call.response.headers.append(HttpHeaders.ContentEncoding, "gzip")
-                        }
-                    }
-                    contentType { resource ->
-                        if (resource.path.contains("wasm.gz")) {
-                            ContentType.Application.Wasm
-                        } else null
-                    }
-                }
-
-                // WebSocket connection to handle socket communication
-                webSocket("/ws") {
-                    initTensors()
-                    currentIndex = 0
-                    while (true) {
-                        val msg = getInferenceResult()
-                        if(msg != null) {
-                            send(Frame.Text(msg))
-                        } else break
-                        delay(10) // 메시지 전송 간격 (밀리초)
-                    }
-                }
-            }
-        }.start(wait = false)
-    }
-
-    // Helper: JSON 파일을 읽고 FloatArray 리스트로 변환
-    private fun loadJsonArray(fileName: String): List<FloatArray> {
-        val file = File(filesDir, fileName)
-        if (!file.exists()) {
-            assets.open(fileName).use { inputStream ->
-                file.outputStream().use { outputStream ->
-                    inputStream.copyTo(outputStream)
-                }
-            }
-        }
-
-        // JSON 파일 읽기
-        val jsonData = file.readText()
-        val jsonArray = JSONArray(jsonData)
-        val resultList = mutableListOf<FloatArray>()
-
-        // 각 row를 FloatArray로 변환하여 리스트에 추가
-        for (i in 0 until jsonArray.length()) {
-            val rowArray = jsonArray.getJSONArray(i)
-            val row = FloatArray(rowArray.length()) { j -> rowArray.getDouble(j).toFloat() }
-            resultList.add(row)
-        }
-        return resultList
-    }
-
-
-    private fun rotationMatrixToRodriguesOpenCV(matrices: FloatArray): FloatArray {
-        // 총 24개의 3x3 행렬로 구성된 1D 리스트
-        require(matrices.size == 216) { "Input must be a 1D list of size 216 (24 * 3 * 3)." }
-
-        val rodriguesVectors = mutableListOf<Float>()
-
-        for (i in 0 until 24) {
-            // 각 3x3 행렬 추출
-            val rotationMatrix = Mat(3, 3, CvType.CV_32F)
-            for (row in 0 until 3) {
-                for (col in 0 until 3) {
-                    val index = i * 9 + row * 3 + col
-                    rotationMatrix.put(row, col, matrices[index].toDouble())
-                }
-            }
-
-            // Rodrigues 변환 수행
-            val rodVector = Mat()
-            Calib3d.Rodrigues(rotationMatrix, rodVector)
-
-            // 결과를 1D 리스트로 변환하여 저장
-            for (j in 0 until 3) {
-                rodriguesVectors.add(rodVector[j, 0][0].toFloat())
-            }
-        }
-
-        // 1D 결과 리스트로 변환
-        return rodriguesVectors.toFloatArray()
-    }
-
     override fun onDestroy() {
         super.onDestroy()
-        session.close()
-    }
-}
-
-class InferenceStats {
-    private val durations = mutableListOf<Long>() // 실행 시간 저장
-
-    // 실행 시간 추가
-    fun addDuration(duration: Long) {
-        durations.add(duration)
-    }
-
-    // 평균, 최소, 최대 계산
-    fun getStats(): Triple<Double, Long, Long> {
-        if (durations.isEmpty()) return Triple(0.0, 0, 0) // 데이터가 없을 경우 처리
-
-        val avg = durations.average() // 평균 계산
-        val min = durations.minOrNull() ?: 0 // 최소값 계산
-        val max = durations.maxOrNull() ?: 0 // 최대값 계산
-        return Triple(avg, min, max)
+        onnxManager.closeSession()
     }
 }
