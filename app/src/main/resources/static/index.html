@@ -23,7 +23,8 @@
         <div id="unity-build-title">My project</div>
       </div>
     </div>
-    <button id="connectBtn">Connect to WebSocket</button> <!-- 버튼 추가 -->
+    <button id="connectBtn" style="display: none;">Connect to WebSocket</button>
+    <button id="disconnectBtn" style="display: none;">Disconnect to WebSocket</button>
 
     <script>
       var container = document.querySelector("#unity-container");
@@ -77,7 +78,7 @@
       //   canvas.style.width = "960px";
       //   canvas.style.height = "600px";
       // }
-      canvas.style.width = "960px";
+      canvas.style.width = "300px";
       canvas.style.height = "600px";
 
       loadingBar.style.display = "block";
@@ -127,6 +128,10 @@
               socket.onclose = () => {
                 console.log("WebSocket connection closed.");
               };
+          });
+
+          document.getElementById("disconnectBtn").addEventListener("click", () => {
+              socket.close();
           });
 
         }).catch((message) => {
