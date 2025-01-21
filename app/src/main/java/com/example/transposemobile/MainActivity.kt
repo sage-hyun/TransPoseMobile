@@ -7,6 +7,7 @@ import androidx.appcompat.app.AppCompatActivity
 import android.webkit.WebView
 import android.widget.Button
 import android.widget.TextView
+import androidx.lifecycle.Observer
 import com.google.android.material.switchmaterial.SwitchMaterial
 
 
@@ -29,7 +30,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         try {
-            // elements
+            // UI elements
             val startBtn: Button = findViewById(R.id.startButton)
             val stopBtn: Button = findViewById(R.id.stopButton)
             val switchToggle: SwitchMaterial = findViewById(R.id.switchToggle)
@@ -49,11 +50,12 @@ class MainActivity : AppCompatActivity() {
             // Ktor 초기화
             ktorServerManager = KtorServerManager(imuDataProducer, onnxManager)
 
+
             fun startBtnCommonAction() {
                 startBtn.visibility = View.GONE
                 stopBtn.visibility = View.VISIBLE
                 switchToggle.isEnabled = false // Switch 비활성화
-                switchToggle.alpha = 0.5f      // 투명도를 줄여 비활성화 표시
+                switchToggle.alpha = 0.7f      // 투명도를 줄여 비활성화 표시
                 imuDataProducer.startBuffering()
             }
             fun stopBtnCommonAction() {
@@ -64,39 +66,56 @@ class MainActivity : AppCompatActivity() {
                 imuDataProducer.stopBuffering()
             }
 
+            // 서버에서 unity WebGL을 확인하는 방식
+            fun switchOffAction() {
+                webView.visibility = View.GONE
+                ktorServerManager.stopServer()
+
+                startBtn.setOnClickListener {
+                    startBtnCommonAction()
+                    socketIoManager.startInference()
+                }
+                stopBtn.setOnClickListener {
+                    stopBtnCommonAction()
+                    socketIoManager.stopInference()
+                }
+            }
+
+            // 모바일에서 unity WebGL을 확인하는 방식
+            fun switchOnAction() {
+                ktorServerManager.startServer()
+
+                // Setup WebView
+                webView.visibility = View.VISIBLE
+                webView.settings.javaScriptEnabled = true
+                webView.loadUrl("http://localhost:5559/unityWebGL")
+
+                startBtn.setOnClickListener {
+                    startBtnCommonAction()
+                    webView.loadUrl("javascript:document.getElementById('connectBtn').click();")
+                }
+                stopBtn.setOnClickListener {
+                    stopBtnCommonAction()
+                    webView.loadUrl("javascript:document.getElementById('disconnectBtn').click();")
+                }
+            }
+
             // 토글 액션
             switchToggle.setOnCheckedChangeListener { _, isChecked ->
                 if (!isChecked) {
-                    webView.visibility = View.GONE
-                    ktorServerManager.stopServer()
-
-                    startBtn.setOnClickListener {
-                        startBtnCommonAction()
-                        socketIoManager.startInference()
-                    }
-                    stopBtn.setOnClickListener {
-                        stopBtnCommonAction()
-                        socketIoManager.stopInference()
-                    }
-
+                    switchOffAction()
                 } else {
-                    ktorServerManager.startServer()
-
-                    // Setup WebView
-                    webView.visibility = View.VISIBLE
-                    webView.settings.javaScriptEnabled = true
-                    webView.loadUrl("http://localhost:5559/unityWebGL")
-
-                    startBtn.setOnClickListener {
-                        startBtnCommonAction()
-                        webView.loadUrl("javascript:document.getElementById('connectBtn').click();")
-                    }
-                    stopBtn.setOnClickListener {
-                        stopBtnCommonAction()
-                        webView.loadUrl("javascript:document.getElementById('disconnectBtn').click();")
-                    }
+                    switchOnAction()
                 }
             }
+            switchOffAction() // 최초 기본 상태
+
+            // LiveData 관찰 - Producer 실행이 끝나면 stop 버튼 자동으로 누르기
+            imuDataProducer.eventLiveData.observe(this, Observer { eventOccurred ->
+                if (eventOccurred) {
+                    stopBtn.performClick()
+                }
+            })
 
         } catch (e: Exception) {
             e.printStackTrace()

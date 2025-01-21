@@ -2,9 +2,13 @@ package com.example.transposemobile
 
 import android.content.res.AssetManager
 import android.util.Log
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.io.File
 
@@ -16,6 +20,10 @@ class ImuDataProducer(private val dataBuffer: ImuDataBuffer,
 
     var isRunning = true // 실행 여부를 제어하는 플래그
     private var currentIndex = 0 // 현재 반복 인덱스
+
+    // LiveData를 통해 이벤트 전달
+    private val _eventLiveData = MutableLiveData<Boolean>()
+    val eventLiveData: LiveData<Boolean> get() = _eventLiveData
 
     init {
         try {
@@ -60,6 +68,11 @@ class ImuDataProducer(private val dataBuffer: ImuDataBuffer,
             // 반복 종료
             Log.d("getImuData", "finished reading.")
             isRunning = false
+
+            // 작업이 끝났다는 사실을 MainThread로 LiveData 전달
+            withContext(Dispatchers.Main) {
+                _eventLiveData.value = true // 작업 완료 이벤트 발생
+            }
         }
     }
 
