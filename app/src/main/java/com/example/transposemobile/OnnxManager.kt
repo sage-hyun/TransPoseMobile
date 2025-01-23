@@ -26,7 +26,7 @@ class OnnxManager(private val dataBuffer: ImuDataBuffer,
     private lateinit var tranTensor: OnnxTensor
 
     // 클래스 인스턴스 생성
-    private val inferenceStats = InferenceStats()
+    val inferenceStats = InferenceStats()
 
     init {
         // 모델 파일 로드
@@ -61,6 +61,8 @@ class OnnxManager(private val dataBuffer: ImuDataBuffer,
         rootYTensor = OnnxTensor.createTensor(onnxEnv, rootY)
         lFootPosTensor = OnnxTensor.createTensor(onnxEnv, lFootPos)
         rFootPosTensor = OnnxTensor.createTensor(onnxEnv, rFootPos)
+
+        inferenceStats.resetDurations()
     }
 
 
