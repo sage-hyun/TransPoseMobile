@@ -54,7 +54,7 @@ class KtorServerManager(private val imuDataProducer: ImuDataProducer,
     }
 
     fun stopServer() {
-        server?.stop(1000, 2000) // 1초 대기 후 중지
+        server?.stop(100, 200) // 0.1초 대기 후 중지
         server = null
     }
 }

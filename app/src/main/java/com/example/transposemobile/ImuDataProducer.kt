@@ -18,8 +18,9 @@ class ImuDataProducer(private val dataBuffer: ImuDataBuffer,
     private lateinit var accData: List<FloatArray>
     private lateinit var oriData: List<FloatArray>
 
-    var isRunning = true // 실행 여부를 제어하는 플래그
-    private var currentIndex = 0 // 현재 반복 인덱스
+    var isRunning: Boolean = true // 실행 여부를 제어하는 플래그
+    var frequency: Long = 100 // 데이터 생성 간격 (Hz)
+    private var currentIndex: Int = 0 // 현재 반복 인덱스
 
     // LiveData를 통해 이벤트 전달
     private val _eventLiveData = MutableLiveData<Boolean>()
@@ -61,8 +62,8 @@ class ImuDataProducer(private val dataBuffer: ImuDataBuffer,
                 // 버퍼 크기 제한
                 dataBuffer.limitBufferSize(100)
 
-                // 10ms 대기
-                delay(10)
+                // 100Hz면 10ms 대기
+                delay(1000 / frequency)
             }
 
             // 반복 종료

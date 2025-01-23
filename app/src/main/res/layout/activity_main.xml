@@ -1,9 +1,67 @@
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:orientation="vertical"
     android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/sliderLabel1"
+            android:layout_width="90dp"
+            android:layout_height="wrap_content"
+            android:text="IMU 생성 빈도" />
+
+        <TextView
+            android:id="@+id/sliderValue1"
+            android:layout_width="60dp"
+            android:layout_height="wrap_content"
+            android:text="100 Hz" />
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/slider1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:stepSize="10"
+            android:valueFrom="10"
+            android:valueTo="100"
+            android:value="100"
+            app:labelBehavior="gone" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/sliderLabel2"
+            android:layout_width="90dp"
+            android:layout_height="wrap_content"
+            android:text="모델 Input Batch size" />
+
+        <TextView
+            android:id="@+id/sliderValue2"
+            android:layout_width="60dp"
+            android:layout_height="wrap_content"
+            android:text="1 Frame" />
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/slider2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:stepSize="1"
+            android:valueFrom="1"
+            android:valueTo="10"
+            android:value="1"
+            app:labelBehavior="gone" />
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
